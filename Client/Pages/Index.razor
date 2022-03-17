@@ -1,0 +1,72 @@
+﻿@page "/"
+@using KendoMapExample.Shared
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager NavigationManager
+
+<TelerikMap @ref="map" Center="@Center" Zoom="3">
+    <MapLayers>
+        <MapLayer Type="@MapLayersType.Marker"
+                  Data="@MarkerData1"
+                  LocationField="@nameof(MyMarkers.LatLng)"
+                  TitleField="@nameof(MyMarkers.Name)">
+        </MapLayer>
+
+        <MapLayer Type="@MapLayersType.Tile"
+                  Attribution="@Attribution"
+                  Subdomains="@Subdomains"
+                  UrlTemplate="@UrlTemplate">
+        </MapLayer>
+    </MapLayers>
+</TelerikMap>
+
+@code {
+    TelerikMap map;
+    string[] Subdomains { get; set; } = new string[] { "a", "b", "c" };
+    string UrlTemplate { get; set; } = "https://#= subdomain #.tile.openstreetmap.org/#= zoom #/#= x #/#= y #.png";
+    string Attribution { get; set; } = "&copy; <a href='https://osm.org/copyright'>OpenStreetMap contributors</a>";
+    double[] Center { get; set; } = new double[] { 30.268107, -97.744821 };
+    HubConnection? hubConnection;
+    List<MyMarkers> MarkerData1 { get; set; } = new List<MyMarkers>();
+
+    protected override async Task OnInitializedAsync()
+    {
+
+        hubConnection = new HubConnectionBuilder()
+            .WithAutomaticReconnect()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/markerhub"))
+            .Build();
+
+        hubConnection.On<IEnumerable<MyMarkers>>("InitialData", async (data) =>
+        {
+            MarkerData1 = new List<MyMarkers>(data);
+            //Doing map.StateHasChanged() causes zoom and center to go back to initialization but does refresh the datasource of the markers.
+            //StateHasChanged();
+            //Doing map.Refresh() causes zoom and center to go back to initialization but does not refresh the datasource of the markers.
+            map.Refresh();
+        });
+
+        hubConnection.On<IEnumerable<MyMarkers>>("UpdateMarkers", (data) =>
+        {
+            var newMarkers = data.Where(x => !MarkerData1.Select(y => y.Name).Contains(x.Name)).ToArray();
+
+            foreach (var air in newMarkers)
+            {
+                MarkerData1.Add(air);
+            }
+            //Doing map.StateHasChanged() causes zoom and center to go back to initialization but does refresh the datasource of the markers.
+            //StateHasChanged();
+            //Doing map.Refresh() causes zoom and center to go back to initialization but does not refresh the datasource of the markers.
+            map.Refresh();
+        });
+
+        await hubConnection.StartAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await hubConnection.SendAsync("GetData");
+        }
+    }
+}
